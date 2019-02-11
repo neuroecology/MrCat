@@ -1,0 +1,48 @@
+MI00454	MK09	control9 all
+MI01082	MK01	control9 all
+MI01087	MK03	control9 all
+MI01089	MK02	control9 1
+MI01120	MK04	control9 all
+MI01295	MK05	control9 all
+MI01297	MK06	control9 all
+MI01300	MK07	control9 all
+MI01302	MK08	control9 all
+MI01461	MK08	control9 1,2,3
+MI01465	MK07	control9 1,2,3
+MI01615	MK08	control9 all
+MI01618	MK07	control9 all
+MI01623	MK05	control9 all
+all	MK08	control9 all
+all	MK07	control9 all
+all	MK05	control9 all
+MI01615	MK08	control all
+MI01618	MK07	control all
+MI01623	MK05	control all
+MI01694	MK05	sma all 0.39 4.5 20.83657137
+MI01704	MK08	sma all 0.9 1.93 19.22825757
+MI01732	MK07	sma all 0.67 2.3 21.05737199
+MI02302 MK07 fpc all 1.05 23.62 9.51
+MI02319 MK08 fpc all 0.54 23.42 10.59
+MI02321 MK05  fpc all 0.35 24 9.53
+MI01700 trevor  fpc all -0.57 24.1 11.79320508
+MI02107 MK04 fpc all -0.09 25.17 10.05
+MI02135 MK11  fpc all -1.36 24 10.39
+MI01754	MK08	pgacc all 0.68 14.81 7.16
+MI01966	MK05	pgacc all 0.49 17.9 8.078460969
+MI01970	MK07	pgacc all 1.68 15.61 6.599795897
+MI01626 MK04 amyg all -11.8732397 -0.21 -11.86 11.71664992 0.49 -10.56
+MI01827 MK01   amyg all -6.967728836 1.42 -9.1 9.959230485 2.62 -9.6
+MI02136 MK10    amyg all -9.88 0.41 -10 9.57 1.04 -10.15
+MI02256 MK11	amyg all -11 0.42 -10.09 8.62 0.42 -10.09
+MI61025	guss	ppsma all 0.42 11.22 17.07
+MI61108	guss	pcontrol 1,2
+MI61122	guss	ppsma all 0.42 11.22 17.07
+MI70110	guss	ppsma all 0.42 11.22 17.07
+MI70124	guss	ppsma all 0.42 11.22 17.07
+MI70131	guss	pv1 all
+MI70228	guss	pcontrol all
+MI70314	guss	pcontrol all
+MI70411	guss	pv1 all
+MI70425	guss	pv1 all
+MI70509	guss	pv1 all
+MI70523	guss	pcontrol all

@@ -1,0 +1,3 @@
+control sma psma 8m 9mc fpc F5c midsts PG POp A1
+sma sma psma 8m 9mc fpc F5c midsts PG POp A1
+fpc sma psma 8m 9mc fpc F5c midsts PG POp A1

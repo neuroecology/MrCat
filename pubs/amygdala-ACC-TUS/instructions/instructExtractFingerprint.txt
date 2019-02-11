@@ -1,0 +1,9 @@
+control9 pgacc Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1
+control9 amyg Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1
+control9 A1 Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1
+pgacc pgacc Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1
+pgacc amyg Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1
+pgacc A1 Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1
+amyg pgacc Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1
+amyg amyg Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1
+amyg A1 Ts2 pIPS M1med 24ab pgacc 8m 9mc 46 9-46v 11m 14 11 11Big 13 47-12o amyg strm A1

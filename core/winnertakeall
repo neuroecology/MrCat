@@ -1,0 +1,44 @@
+#!/bin/sh
+
+if [ "$3" == "" ];then
+    echo ""
+    echo "Usage: winnertakeall [-thr val ] <output> <image1> <image2> ...."
+    echo "       winnertakeall [-thr val ] <output> <4Dimage> "
+    echo ""
+    exit 1
+fi
+
+thr=""
+if [ "$1" == "-thr" ];then
+    thr="-thr $2"
+    shift
+    shift
+fi
+
+o=$1
+shift
+list=$*
+
+tmp=`$FSLDIR/bin/tmpnam`
+
+if [ `$FSLDIR/bin/imtest $o` -eq 1 ];then
+    echo ""
+    echo -n "Image $o already exists, overwrite? [Y/N]: "
+    read answer
+    if [ "$answer" == "N" ];then
+	echo "Exit without doing anything"
+	exit 1    
+    elif [ "$answer" != "Y" ];then
+	echo "You have to choose between Y and N - exiting anyway"
+	exit 1
+    fi
+
+fi
+
+
+$FSLDIR/bin/fslmerge -t $tmp $list
+
+$FSLDIR/bin/fslmaths $tmp $thr -abs -Tmean ${tmp}_mask
+
+
+$FSLDIR/bin/fslmaths $tmp -Tmaxn -add 1 -mas ${tmp}_mask $o

@@ -1,0 +1,2 @@
+control9 amyg_amyg amyg_surf amyg_fund amyg_ubank amyg_ibank amyg_sgyr amyg_igyr amyg_antsgyr amyg_possgyr amyg_antigyr amyg_antfund amyg_posfund
+amyg amyg_amyg amyg_surf amyg_fund amyg_ubank amyg_ibank amyg_sgyr amyg_igyr amyg_antsgyr amyg_possgyr amyg_antigyr amyg_antfund amyg_posfund

@@ -1,0 +1,11 @@
+fslmaths ${1} -mul 0 -add 1 temp_ones_${1}
+fslmaths temp_ones_${1} -add ${1} temp_plus_${1}
+fslmaths temp_ones_${1} -sub ${1} temp_min_${1}
+fslmaths temp_plus_${1} -div temp_min_${1} temp_div_${1}
+fslmaths temp_div_${1} -log temp_log_${1}
+fslmaths temp_log_${1} -mul 0.5 z_${1}
+rm temp_ones_${1}
+rm temp_plus_${1}
+rm temp_min_${1}
+rm temp_div_${1}
+rm temp_log_${1}

@@ -1,0 +1,9 @@
+globalMagnitude control sma
+globalMagnitude control fpc
+globalExtent control sma
+globalExtent control fpc
+meanConn control sma
+meanConn control fpc
+globalMagnitude control_run1 sma_run1
+globalMagnitude control_run2 sma_run2
+globalMagnitude control_run3 sma_run3

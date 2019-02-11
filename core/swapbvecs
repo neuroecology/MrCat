@@ -1,0 +1,80 @@
+#!/bin/bash
+
+if [ $# -lt 5 ]
+then
+    echo "Usage: $0 <in_bvec> <a> <b> <c> <out_bvec> "
+    echo ""
+    echo "Swaps lines in in_bvecs file from current x,y,z axes to"
+    echo "have axes a,b,c. Axis syntax is identical to fslswapdim."
+    exit 1
+fi
+
+INFILE=$1
+OUTFILE=$5
+A=$2
+B=$3
+C=$4
+
+TMP=`tmpnam`
+fslcreatehd 1 1 1 1 1 1 1 1 0 0 0 2 $TMP
+MAT=`fslswapdim $TMP $A $B $C`
+
+XX=`echo $MAT | awk '{print $1}'`
+XY=`echo $MAT | awk '{print $2}'`
+XZ=`echo $MAT | awk '{print $3}'`
+YX=`echo $MAT | awk '{print $5}'`
+YY=`echo $MAT | awk '{print $6}'`
+YZ=`echo $MAT | awk '{print $7}'`
+ZX=`echo $MAT | awk '{print $9}'`
+ZY=`echo $MAT | awk '{print $10}'`
+ZZ=`echo $MAT | awk '{print $11}'`
+
+XLIN=`$MRCATDIR/core/getlines 1 1 $INFILE`
+YLIN=`$MRCATDIR/core/getlines 2 2 $INFILE`
+ZLIN=`$MRCATDIR/core/getlines 3 3 $INFILE`
+
+NX=`echo $XLIN | wc -w`
+NY=`echo $YLIN | wc -w`
+NZ=`echo $ZLIN | wc -w`
+
+if [ ! $NX -eq $NY ] ; then
+     echo "ERROR : ${INFILE} has different length lines"
+     exit
+else
+   if [ ! $NX -eq $NZ ] ; then
+     echo "ERROR : ${INFILE} has different length lines"
+     exit
+else
+   if [ ! $NY -eq $NZ ] ; then
+     echo "ERROR : ${INFILE} has different length lines"
+     exit
+     fi
+   fi
+fi
+
+N=1;
+while [ $N -le $NX ] ; do
+
+     CURR_X=`echo $XLIN | awk '{print $1}'`
+     CURR_Y=`echo $YLIN | awk '{print $1}'`
+     CURR_Z=`echo $ZLIN | awk '{print $1}'`
+
+     NEW_X=`echo "($XX * $CURR_X) + ($XY * $CURR_Y) + ($XZ * $CURR_Z)" | bc`
+     NEW_Y=`echo "($YX * $CURR_X) + ($YY * $CURR_Y) + ($YZ * $CURR_Z)" | bc`
+     NEW_Z=`echo "($ZX * $CURR_X) + ($ZY * $CURR_Y) + ($ZZ * $CURR_Z)" | bc`
+
+     NEW_XLIN="$NEW_XLIN $NEW_X"
+     NEW_YLIN="$NEW_YLIN $NEW_Y"
+     NEW_ZLIN="$NEW_ZLIN $NEW_Z"
+
+     XLIN=`echo $XLIN | awk '{for(i=2;i<=NF;i++) print $i}'`
+     YLIN=`echo $YLIN | awk '{for(i=2;i<=NF;i++) print $i}'`
+     ZLIN=`echo $ZLIN | awk '{for(i=2;i<=NF;i++) print $i}'`
+
+     N=`echo "$N + 1" | bc`
+
+done
+
+echo ${NEW_XLIN} >  ${OUTFILE}
+echo ${NEW_YLIN} >> ${OUTFILE}
+echo ${NEW_ZLIN} >> ${OUTFILE}

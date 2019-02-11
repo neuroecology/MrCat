@@ -1,0 +1,9 @@
+control subj MK1 MK3 MK2
+control run run1 run2 run3
+control subjrun MK1.run1 MK1.run2 MK1.run3 MK3.run1 MK3.run2 MK3.run3 MK2.run1 MK2.run2 MK2.run3
+sma subj MK1 MK3 MK2
+sma run run1 run2 run3
+sma subjrun MK1.run1 MK1.run2 MK1.run3 MK3.run1 MK3.run2 MK3.run3 MK2.run1 MK2.run2 MK2.run3
+fpc subj MK1 MK3 MK2
+fpc run run1 run2 run3
+fpc subjrun MK1.run1 MK1.run2 MK1.run3 MK3.run1 MK3.run2 MK3.run3 MK2.run1 MK2.run2 MK2.run3

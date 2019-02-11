@@ -1,0 +1,2 @@
+globalMagnitude control9 amyg
+globalMagnitude control9 pgacc

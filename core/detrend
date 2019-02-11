@@ -1,0 +1,48 @@
+#!/bin/sh
+
+if [ "$2" == "" ];then
+    echo ""
+    echo "Usage: detrend <input> <output> -m "
+    echo ""
+    echo "-m : keep mean"
+    echo ""
+    exit 1
+fi
+
+i=$1
+o=$2
+shift;
+shift;
+
+m=""
+if [ "$1" == "-m" ];then
+    m="keep"
+fi
+
+nvols=`$FSLDIR/bin/fslval $i dim4`
+
+if [ "$nvols" -lt 2 ];then
+    echo ""
+    echo "Input must be 4D with at least 2 volumes"
+    echo ""
+    exit 1
+fi
+
+f=`$FSLDIR/bin/tmpnam`
+rm -rf ${f}_txt
+for ((k=1;k<=$nvols;k++));do
+    printf "%f\t%f\n" 1 $k >> ${f}_txt
+done
+$FSLDIR/bin/Text2Vest ${f}_txt ${f}_vest
+
+$FSLDIR/bin/fsl_glm -i $i -o ${f}_tmp -d ${f}_vest \
+    --out_res=${f}_res
+
+if [ "$m" == keep ];then
+    $FSLDIR/bin/fslmaths $i -Tmean ${f}_mean
+    $FSLDIR/bin/fslmaths ${f}_res -add ${f}_mean $o
+else
+    $FSLDIR/bin/imcp ${f}_res $o
+fi
+
+$FSLDIR/bin/fslcpgeom $i $o

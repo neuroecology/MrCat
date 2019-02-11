@@ -1,0 +1,3 @@
+fpc sma sma IPLc PCC MCC SPL M1lat 9mc fpc 9-46d 8A 11m aSTG midsts A1
+fpc fpc fpc IPLc PCC MCC sma 9mc 9-46d 14m 25 47-12o F4 PF midsts A1
+fpc A1 IPLc PCC MCC SPL M1lat sma 9mc fpc 9-46d 8A 11m 14m 25 47-12o F4 PF aSTG midsts A1

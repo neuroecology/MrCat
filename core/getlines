@@ -1,0 +1,19 @@
+#!/bin/bash
+
+if [ $# -eq 0 ] 
+then
+    echo "Usage: $0 firstline lastline filename"
+    exit 1
+fi
+
+if [ $# -eq 3 ]; then
+    LL=`echo "$2 $1 - 1+p" | dc`
+    if [ -e $3 ]; then
+    	tail -n +${1} $3 | head -n$LL
+    else
+    	echo "$0: Error opening file $3" 
+	exit 2
+    fi   
+else
+    echo "Missing arguments!"	
+fi
