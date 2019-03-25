@@ -9,7 +9,8 @@ set -e    # stop immediately on error
 #sh Coord2ROI.sh --warpmethod=coord --coord=./Oliver/ROIs/TS_coords.txt --dil=5 --refa=F99 --refb=./Oliver/MI00539_proc/f_mean.nii.gz --warpb2a=./Oliver/MI00539_proc/f_mean_to_structural_to_groupavg_2_warp.nii.gz --dir=./Oliver/MI00539_proc/ROI_coord
 #sh Coord2ROI.sh --warpmethod=roi --coord=./Oliver/ROIs/TS_coords.txt --dil=5 --refa=F99 --refb=./Oliver/MI00539_proc/f_mean.nii.gz --maskb=refb --warpa2b=./Oliver/MI00539_proc/groupavg_2_to_structural_to_f_mean_warp.nii.gz --dir=./Oliver/MI00539_proc/ROI_roi
 #sh Coord2ROI.sh --warpmethod=none --coord=./Oliver/ROIs/TS_coords.txt --dil=5 --refa=F99 --maska=$MRCATDIR/data/macaque/F99/McLaren_brain_mask --dir=./Oliver/ROI_F99
-
+#sh Coord2ROI.sh --warpmethod=none --coord="10@24@54" --dil=5 --refa=F99 --maska=$MRCATDIR/data/macaque/F99/McLaren_brain_mask --dir=./Oliver/ROI_F99
+# minor change to doc for no other reason than to trigger a push
 
 # ------------------------------ #
 # Help
@@ -29,7 +30,7 @@ Coord2ROI.sh: transform a list of coordinates in space 'A' (e.g. in MNI
               allow the ROI to be distorted on a case-by-case basis.
 
 example:
-      sh Coord2ROI_ANTs.sh \
+      sh Coord2ROI.sh \
         --warpmethod=coord \
         --coord=coordList.txt \
         --dil=2 \
@@ -44,12 +45,20 @@ usage: $(basename $0)
         --coord=<file>  a text file containing a list of coordinates to expand.
                         Each line contains the [X Y Z] coordinates of one ROI
                         optionally with the ROI name in the fourth position
-                        [X Y Z name]
+                        [X Y Z name].
+                        Alternatively, you can specify a @-delineated list:
+                        X@Y@Z@name
         --dil=<mm>      how many mm to dilate
-        --refa=<img>    reference image in spaceA, or 'F99', 'D99', 'MNI', 'SL'
+        --ref=<img>     reference image in target space
+                        if would like to warp between a source and target space,
+                        please use the options --refa and --refb
       optional arguments
-        --refb=<img>    reference image in spaceB, or 'F99', 'D99', 'MNI', 'SL'
-        --warpmethod=X  'coord' (default): warp the coordinates from A to B and
+        --refa=<img>    reference image in source space (spaceA)
+                        can also be one of 'F99', 'D99', 'MNI', 'SL'
+        --refb=<img>    reference image in target space (spaceB)
+                        can also be one of 'F99', 'D99', 'MNI', 'SL'
+        --warpmethod=X  'none': (default when only one reference is specified)
+                        'coord' (default): warp the coordinates from A to B and
                                 create the ROI in spaceB
                                 this requires B-to-A (inverse) warp-field
                         'roi':  create the ROI in spaceA and warp to spaceB
@@ -80,6 +89,7 @@ if [[ $# -eq 0 ]] || [[ $@ =~ --help ]] ; then usage; exit 0; fi
 # if too few arguments given, return the usage, exit with error
 if [[ $# -lt 3 ]] ; then >&2 usage; exit 1; fi
 
+
 # parse the input arguments
 #------------------------------
 for a in "$@" ; do
@@ -87,6 +97,7 @@ for a in "$@" ; do
     --warpmethod=*) warpMethod="${a#*=}"; shift ;;
     --coord=*)      coordFile="${a#*=}"; shift ;;
     --dil=*)        dilMM="${a#*=}"; shift ;;
+    --ref=*)        refBImg="${a#*=}"; shift ;;
     --refa=*)       refAImg="${a#*=}"; shift ;;
     --refb=*)       refBImg="${a#*=}"; shift ;;
     --maska=*)      maskAImg="${a#*=}"; shift ;;
@@ -102,15 +113,18 @@ done
 # check if no redundant arguments have been set
 if [[ -n $arg ]] ; then >&2 echo ""; >&2 echo "unsupported arguments are given: $arg"; usage; exit 1; fi
 
+# check if obligatory arguments have been set
+if [[ -z $coordFile ]] ; then >&2 echo ""; >&2 echo "please provide coordinates with --coord"; usage; exit 1; fi
+if [[ -z $dilMM ]] ; then >&2 echo ""; >&2 echo "please specify the dilation radius with --dil"; usage; exit 1; fi
+
+
 # set defaults for optional arguments
 #------------------------------
-[[ -z $workDir ]] && workDir=$(dirname $refBImg)/ROI
-[[ -z $warpmethod ]] && warpmethod="coord"
 [[ -z $flgClosestVox ]] && flgClosestVox=0
 
 # test if ANTs ImageMath is present on the path
 #------------------------------
-flgANTs=$(which ImageMath) || true
+flgANTs=$(which ImageMath 2> /dev/null) || true
 
 # remove extensions
 #------------------------------
@@ -128,23 +142,69 @@ flgANTs=$(which ImageMath) || true
 [[ -z $refAImg ]] && [[ -n $refBImg ]] && refAImg="" && maskAImg=""
 [[ -n $refAImg ]] && [[ -z $refBImg ]] && refBImg=$refAImg && refAImg="" && maskBImg=$maskAImg && maskAImg=""
 
+# define working directory
+#------------------------------
+if [[ -z $workDir ]] ; then
+  if [[ -n $refBImg ]] && [[ $(imtest $refBImg) -eq 0 ]] ; then
+    workDir=$(pwd)/ROI
+  else
+    workDir=$(dirname $refBImg)/ROI
+  fi
+fi
+
+# make a ROI directory, with a temporary working directory
+mkdir -p $workDir
+tmpDir=$(mktemp -d $workDir/tmp.XXXXXXXXXX)
+
+
 # set method and type of warp
 #------------------------------
+if [[ -z $warpmethod ]] ; then
+  [[ -n $refAImg ]] && [[ -n $refBImg ]] && warpmethod="coord" || warpmethod="none"
+fi
 case $warpMethod in
   coord ) warpField=$warpB2A; warpFieldOther=$warpA2B ;;
   roi ) warpField=$warpA2B; warpFieldOther=$warpB2A ;;
-  * ) warpField="" ;;
+  * ) warpField=""; warpFieldOther="" ;;
 esac
-[[ -z $warpField ]] && [[ -n $warpFieldOther ]] && >&2 printf "\nError: Please provide the appropriate warpfield (A-to-B or B-to-A), matching --warpmethod=X.\n\n" && exit 1
-[[ -n $warpField ]] && warpType=$(fslval $warpField dim5 | awk '($1==1){print "FSL"}{print "ANTs"}') || warpType=""
-[[ -n $warpType ]] && [[ -z $refBImg ]] && >&2 printf "\nError: If you provide a warp-field, please also provide reference images for both spaceA and spaceB.\n\n" && exit 1
+if [[ -z $warpField ]] && [[ -n $warpFieldOther ]] ; then
+  warpType=$(fslval $warpFieldOther dim5 | awk '($1==1){print "FSL"}($1>1){print "ANTs"}')
+  if [[ $warpType == FSL ]] ; then
+    echo "inverting the warpfield"
+    echo "to avoid this, please provide the appropriate warpfield (A-to-B or B-to-A), matching --warpmethod=X"
+    echo ""
+    case $warpMethod in
+      coord ) refWarp=$refAImg ;;
+      roi ) refWarp=$refBImg ;;
+    esac
+    warpField=$tmpDir/warp
+    invwarp -w $warpFieldOther -o $warpField -r $refWarp
+  else
+    >&2 printf "\nError: Please provide the appropriate warpfield (A-to-B or B-to-A), matching --warpmethod=X.\n\n" && exit 1
+  fi
+fi
+[[ -n $warpField ]] && warpType=$(fslval $warpField dim5 | awk '($1==1){print "FSL"}($1>1){print "ANTs"}') || warpType=""
+[[ -n $warpType ]] && [[ -z $refAImg ]] && >&2 printf "\nError: If you provide a warp-field, please also provide reference images for both spaceA and spaceB.\n\n" && exit 1
 [[ -z $warpField ]] || [[ -z $warpType ]] && warpMethod=none
 
 # handle reference and mask images
 #------------------------------
 # set default reference images
-[[ -n $refAImg ]] && [[ $(imtest $refAImg) -eq 0 ]] && refAImg=$MRCATDIR/data/macaque/$refAImg/McLaren
-[[ -n $refBImg ]] && [[ $(imtest $refBImg) -eq 0 ]] && refBImg=$MRCATDIR/data/macaque/$refBImg/McLaren
+if [[ -n $refAImg ]] && [[ $(imtest $refAImg) -eq 0 ]] ; then
+  if [[ $refAImg =~ / ]] || [[ $refAImg =~ . ]] ; then
+    >&2 printf "\nError: The reference image does not exist:\n  %s\n\n" "$refAImg" && exit 1
+  else
+    refAImg=$MRCATDIR/data/macaque/$refAImg/McLaren
+  fi
+fi
+if [[ -n $refBImg ]] && [[ $(imtest $refBImg) -eq 0 ]] ; then
+  if [[ $refBImg =~ / ]] || [[ $refBImg =~ . ]] ; then
+    >&2 printf "\nError: The reference image does not exist:\n  %s\n\n" "$refBImg" && exit 1
+  else
+    refBImg=$MRCATDIR/data/macaque/$refBImg/McLaren
+  fi
+fi
+
 
 # if requested, use the reference image to create a binary mask
 [[ -n $maskAImg ]] && [[ $maskAImg == refa ]] && maskBImg=$refAImg
@@ -167,9 +227,11 @@ done
 # Here be dragons
 # ------------------------------ #
 
-# make a ROI directory, with a temporary working directory
-mkdir -p $workDir
-tmpDir=$(mktemp -d $workDir/tmp.XXXXXXXXXX)
+# write the coordFile if it does not exist yet
+if [[ ! -f $coordFile ]] ; then
+  echo ${coordFile//@/ } > $tmpDir/coord.txt
+  coordFile="$tmpDir/coord.txt"
+fi
 
 # ensure reference images are 3D, take mean over 4D otherwise
 [[ -n $refAImg ]] && [[ $(fslval $refAImg dim4) -gt 1 ]] && fslmaths $refAImg -Tmean $tmpDir/refA && refAImg=$tmpDir/refA
