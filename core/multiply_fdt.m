@@ -9,7 +9,7 @@ function [data, varargout] = multiply_fdt(varargin)
 %   multiply_fdt_eco('fdt_matrix2','mymatrix2.dot','fdt_paths','tract1.nii.gz','fdt_path2','tract2.nii.gz','mask','MNI152_2mm_brain_mask.nii.gz','outputname','results');
 %
 % Inputs (using parameter format):
-%   'fdt_matrix2'   string containing fdt_matrix2 file
+%   'fdt_matrix2'   string containing fdt_matrix2 file or 'preloaded'
 %   'fdt_paths'     string containing fdt_paths file, can be repeated
 %   'mask'          string containing mask for fdt_paths
 %   'outputname'    string containing output file, assuming .func.gii (if one tract),
@@ -20,10 +20,12 @@ function [data, varargout] = multiply_fdt(varargin)
 %                   are used, threshold is applied after normalise
 %   'eco'           run multiplication iteratively to reduce computational load
 %                   'yes' or 'no' (default)
+%   'preloaded_fdt_matrix2' matrix
 %
 % Uses: readimgfile.m, saveimgfile.m
 %
 % version history
+% 2019-03-25  Rogier  added preloading of fdt_matrix2 option to allow for faster testing
 % 2018-11-22  Rogier  improved debugging info
 % 2018-11-16  Rogier  added debugging info
 % 2018-10-16  Rogier  changed internal var handling to kill normalise bug
@@ -51,6 +53,7 @@ hemi = [];
 norm_flag = 'no';
 thresh = [];
 eco = 'no';
+fdt_matrix2 = [];
 
     for vargnr = 2:2:length(varargin)
         switch varargin{vargnr-1}
@@ -71,6 +74,8 @@ eco = 'no';
                 thresh = varargin{vargnr};
             case 'eco'
                 eco = varargin{vargnr};
+	    case 'preloaded_fdt_matrix2'
+	    	fdt_matrix2 = varargin{vargnr};
         end
     end
 
@@ -83,6 +88,11 @@ if strcontain(output_file,'.func.gii') || strcontain(output_file,'.dtseries.nii'
   if isempty(hemi)
     error('Error in MrCat:multiply: hemisphere not defined for output .func.gii or .dtseriies.nii!');
   end
+end
+
+
+if isequal(fdt_matrix2_file,'preloaded')
+	if isempty(fdt_matrix2), error('Error in MrCat:multiply_fdt: no preloaded fdt_matrix2 found!'); end
 end
 
 %==================================================
@@ -115,14 +125,15 @@ for i = 1:n_fdt_paths
     fdt_paths(:,i) = data; clear data;
 end
 
-fdt_matrix2 = readimgfile(fdt_matrix2_file);
-if isfield(fdt_matrix2,'avgmat')
-    fdt_matrix2 = fdt_matrix2.avgmat; % Deal with averaged fdt_matrix2
+if ~isequal(fdt_matrix2_file,'preloaded')
+	fdt_matrix2 = readimgfile(fdt_matrix2_file);
+	if isfield(fdt_matrix2,'avgmat')
+    		fdt_matrix2 = fdt_matrix2.avgmat; % Deal with averaged fdt_matrix2
 
-    % debugging info
-    fprintf('fdt_matrix2 is %i by %i\n',size(fdt_matrix2,1),size(fdt_matrix2,2));
-
+	end    
 end
+% debugging info
+fprintf('fdt_matrix2 is %i by %i\n',size(fdt_matrix2,1),size(fdt_matrix2,2));
 
 fprintf('done\n');
 
