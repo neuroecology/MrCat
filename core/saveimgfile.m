@@ -1,5 +1,5 @@
-function saveimgfile(data,filename,reqparam)
-% function saveimgfile(data,filename,varargin)
+function saveimgfile(data,filename,reqparam,varargin)
+% function saveimgfile(data,filename,reqparam)
 %
 % This is the compantion of readimgfile, allowing you to save as many image
 % format files as possible, based on a matrix. Various external toolboxes
@@ -8,6 +8,7 @@ function saveimgfile(data,filename,reqparam)
 %   .func.gii       'R' or 'L', string containing hemisphere
 %   .dtseries.nii   'R', 'L', or 'LR', string containing hemisphere
 %   .mat
+%   .txt
 %   
 %--------------------------------------------------------------------------
 %
@@ -20,9 +21,14 @@ function saveimgfile(data,filename,reqparam)
 %   filename    string containing filename with extension
 %   reqparam    required parameter (see above)
 %
+% Optional inputs (using parameter format):
+%   fslcpgeom   image to copy geometry using fslcpgeom
+%
 % Uses: save_nii.m, gzip.m, strcontain.m, strerase.m, create_func_gii.m
 %
 % version history
+% 2021-04-14    Rogier  added fslcpgeom varargin option
+% 2020-07-21    Rogier  added .txt output option
 % 2018-08-15    Rogier  can now handle .surf.gii using Martin's
 %                       create_gifti
 % 2018-07-10    Rogier  .nii.gz now forces radiological (note: doesn't flip
@@ -35,6 +41,21 @@ function saveimgfile(data,filename,reqparam)
 % Rogier B. Mars
 % University of Oxford & Donders Institute, 2016-02-15
 %--------------------------------------------------------------------------
+
+%==================================================
+% Optional inputs
+%==================================================
+
+fslcpgeom = [];
+
+if nargin>3
+    for vargnr = 2:2:length(varargin)
+        switch varargin{vargnr-1}
+            case 'fslcpgeom'
+                fslcpgeom = varargin{vargnr};
+        end
+    end
+end
 
 %==================================================
 % Determine file type
@@ -50,6 +71,8 @@ elseif strcontain(filename,'.mat')
     filetype = '.mat';
 elseif strcontain(filename,'surf.gii')
     filetype = '.surf.gii';
+elseif strcontain(filename,'txt')
+    filetype = '.txt';
 else
     error('Error in MrCat:saveimgfile: File type not found!');
 end
@@ -66,6 +89,9 @@ switch filetype
         delete(strerase(filename,'.gz'));
         FSLDIR = getenv('FSLDIR');
         unix([FSLDIR '/bin/fslorient -forceradiological ' filename]);
+        if ~isempty(fslcpgeom)
+            unix([FSLDIR '/bin/fslcpgeom ' fslcpgeom ' ' filename ' -d']);
+        end
     case '.func.gii'
         if isequal(reqparam,'R') || isequal(reqparam,'L')
                 % create_func_gii(data,strerase(filename,filetype),reqparam);
@@ -87,4 +113,6 @@ switch filetype
         else
             error('Error in MrCat:saveimgfile: unknown hemisphere for .surf.gii!');
         end
+    case '.txt'
+        save(filename,'data','-ascii');
 end

@@ -1,0 +1,601 @@
+#!/bin/sh
+
+# phoenix
+#
+# Implements preprocessing for post-mortem diffusion data, focused on spin-echo data from RII/ROB and BSB
+#
+# Version history
+#	07072020 Lea add preprocessing for template pipeline
+#	09052020 Rogier	tested setorigin
+#	08052020 Rogier	added setorigin (not tested yet)
+# 	06052020 Rogier created
+#
+# Rogier B. Mars, University of Oxford/Donders Institute, 06052020
+
+if [ $# -lt 1 ]
+then
+    echo "
+Tasks
+  	initbvecsROB	: extract bvecs from ROB data
+  	initdMRIROB	: copying raw diffusion data to \"orig\" folder from ROB data
+  	createnodif   	: create average nodif and nodif_brain_mask image in current space
+  	biascorrnodif 	: correct the spatial intensity bias in the nodif image in the current space
+  	maskout		: mask out residual signal (such as vitame), requires maskout_image to be set
+  	removevols	: remove the first 8 volumes of data, bvecs, and bvals
+  	dtifit		: fit diffusion tensors to the data in current space
+  	fake_t1       	: create fake T1w based on bedpostx using Benn (default) or Glasser method
+  	bedpostX	: run bedpostX with default parameters in current space
+  	swapdim		: swap the dimensions of all data and bvecs to approximate a standard orientation
+  	flip_bvecs_x  	: flip bvecs in x (or same for y z) dimension
+  	extend_image_dim: extend dimenions of image by adding slices
+  	acpc		: register to a reference in \"acpc\" space if acpcmat specified
+  	setorigin	: change sform to reflect different origin
+    inittemplate : copy files in correct folder for template pipeline
+  
+Variables for your config:
+	name		: name of the sample
+	root        	: default: /vols/Data/rbmars/ex-vivo
+	matlabdir   	: default: /opt/fmrib/bin
+	dataset 	: date of scan
+	acpcmat     	: flirt matrix from current space to acpc space
+	acpctarget  	: ref image for acpc flirt (dti_FA default)
+	maskout_image 	: image (including path)
+	offset		: offset for set origin
+"  
+  exit 1;
+
+fi
+
+# ============================================
+# housekeeping
+# ============================================
+
+# Source config file
+source $1
+
+# Defaults and unset essentials
+if [ -z $name ]; then echo "Error in MrCat:phoenix: required parameter name is unset"; exit 1; fi
+if [ -z $initbvecs ]; then initbvecs=FALSE; fi
+if [ -z $root ]; then root=/vols/Data/rbmars/ex-vivo; fi
+if [ -z $MRCATDIR ]; then echo "Error in MrCat:phoenix: environment variable MRCATDIR not set!"; exit 1; fi
+if [ -z $matlabbin ]; then matlabbin=/opt/fmrib/bin; fi
+if [ -z $dataset ]; then echo "Error in MrCat:phoenix: required parameter dataset is unset!"; exit 1; fi
+if [ -z $tasks ]; then echo "Error in MrCat:phoenix: no tasks specified!"; exit 1; fi
+if [ -z $space ]; then echo "Space not set: assuming orig"; space=orig; fi
+
+WD=$root/$name/$dataset
+
+# Check if template requirement
+templating=0
+# parse the input arguments
+while [[ $# -gt 0 ]] ; do
+  case "$2" in
+      -tp|--template)  templating=1; shift 2 ;;
+  *) args=$(echo "$args" "$1"); shift ;; # either obligatory or unknown option
+  esac
+done
+
+# ============================================
+# loop over tasks
+# ============================================
+
+for task in $tasks; do
+
+	#echo "Working on task: $task"
+
+	# -----------------------------------------
+	# initbvecsROB
+	# -----------------------------------------
+
+	if [ $task = initbvecsROB ] ; then
+  		echo "Working on task: run matlab script to obtain bvecs and bvals"
+
+		# Check required inputs
+		if [ -z $raw_dMRI_folder ]; then echo "Error in MrCat:phoenix: raw_dMRI_folder not specified for task initbvecs!"; exit 1; fi
+		if [ -z $raw_dMRI_prepad ]; then echo "Error in MrCat:phoenix: raw_dMRI_prepad not specified for task initbvecs!"; exit 1; fi
+		if [ -z $raw_bvec_images ]; then echo "Error in MrCat:phoenix: raw_bvec_images not specified for task initbvecs!"; exit 1; fi
+		ROB_scripts=${MRCATDIR}/pipelines/ex_vivo/ROB_scripts
+
+  		$matlabbin/matlab -nojvm -nodisplay -nosplash -r "path(genpath('${MRCATDIR}'),path); procpar2bvalsbvecs2('$root','$name','$dataset','$ROB_scripts','$raw_dMRI_folder','$raw_dMRI_prepad',${raw_bvec_images}); quit"
+
+  		echo "  done"
+	fi # --initbvecs
+
+	# -----------------------------------------
+	# initdMRIROB
+	# -----------------------------------------
+
+	# copy original diffusion images to working directory
+	if [ $task = initdMRIROB ] ; then
+  		echo "Working on task: copying raw diffusion data to \"orig\" folder"
+
+		# Check required inputs
+		if [ -z $raw_dMRI_folder ]; then echo "Error in MrCat:phoenix: raw_dMRI_folder not specified for task initdMRI!"; exit 1; fi
+	
+  		# make a new folder for the diffusion images
+  		mkdir -p $WD/orig/dMRI
+
+  		# gzip original images
+  		str=""
+  		for c in "${!files_orig_dMRI[@]}" ; do
+			# echo ${files_orig_dMRI[$c]}
+    			# gzip the original images to save space
+    			img=$root/$name/raw/$raw_dMRI_folder/${files_orig_dMRI[$c]}/MG/image001.nii
+    			[[ -f $img ]] && gzip $img
+    			img=${img}.gz
+
+    			# create string for fslmerge
+    			str=$(echo $str $img)
+  		done # images
+
+  		# concatenate into a single image
+  		fslmerge -t $WD/orig/dMRI/data $str
+
+  		# extract a single image (for faster header reading)
+  		mkdir -p $WD/orig/dMRI/raw/
+  		fslroi $WD/orig/dMRI/data $WD/orig/dMRI/raw/data_firstimg 0 1
+
+  		echo "  done"
+	fi # --initdMRI
+
+	# -----------------------------------------
+	# createnodif
+	# -----------------------------------------
+
+	# create a no-diffusion image
+	if [ $task = createnodif ] ; then
+ 		echo "Working on task: creating average nodif image in the current space"
+
+  		# make folder to hold b0 images
+  		mkdir -p $WD/$space/dMRI/raw/
+
+  		# find b0 images
+  		[[ ! -r $WD/$space/dMRI/bvals ]] && echo "no bvals file found in \"$WD/$space/dMRI/bvals\". Please create it, for example using procpar2bvalsbvecs in Matlab."
+  		c=0
+  		for bval in $(cat $WD/$space/dMRI/bvals) ; do
+    			if [[ $(echo $bval | awk '{print ($1<20)}') == 1 ]] ; then
+      				echo "  $c $bval"
+      				fslroi $WD/$space/dMRI/data $WD/$space/dMRI/raw/nodif_$c $c 1
+    			fi
+    			((++c))
+  		done
+
+  		# average b0s into a single image
+  		str_all="$WD/$space/dMRI/raw/nodif_*.nii.gz"
+  		fslmerge -t $WD/$space/dMRI/raw/nodif_all $str_all
+  		fslmaths $WD/$space/dMRI/raw/nodif_all -Tmean $WD/$space/dMRI/nodif
+  		imrm $WD/$space/dMRI/raw/nodif_all
+
+      # create nodif_brain_mask
+      if [ -z $nodifbrain_threshold ]; then
+          fslmaths $WD/$space/dMRI/nodif -thr 1000 -bin $WD/$space/dMRI/nodif_brain_mask.nii.gz
+      elif [ ! -z $nodifbrain_threshold ]; then
+          fslmaths $WD/$space/dMRI/nodif -thr $nodifbrain_threshold -bin $WD/$space/dMRI/nodif_brain_mask.nii.gz
+      fi
+
+  		echo "  done"
+	fi # --createnodif
+
+	# -----------------------------------------
+	# biascorrnodif
+	# -----------------------------------------
+
+	# biascorrect the nodif image
+	if [ $task = biascorrnodif ] ; then
+  		echo "Working on task: correcting the spatial intensity bias in the nodif image in the current space"
+
+  		# smoothness definitions
+  		sigma=4
+  		FWHM=$(echo "2.3548 * $sigma" | bc)
+
+  		# run RobustBiasCorr on the nodif image
+  		$MRCATDIR/core/RobustBiasCorr.sh \
+    			--in=$WD/$space/dMRI/nodif \
+    			--workingdir=$WD/$space/dMRI/biascorr \
+    			--brainmask=$WD/$space/dMRI/nodif_brain_mask \
+    			--basename=nodif \
+    			--FWHM=$FWHM \
+    			--type=2 \
+    			--forcestrictbrainmask="FALSE" --ignorecsf="FALSE"
+
+    		# copy the restored image and ignore extrapolations
+    		fslmaths $WD/$space/dMRI/biascorr/nodif_restore -mas $WD/$space/dMRI/nodif_brain_mask $WD/$space/dMRI/nodif_restore
+    		# remove working directory
+    		rm -rf $WD/$space/dMRI/biascorr
+
+    		echo "  done"
+	fi # --biascorrnodif
+
+	# -----------------------------------------
+	# maskout
+	# -----------------------------------------
+
+	if [ $task = maskout ] ; then
+		echo "Working on task: masking out image in current space"
+
+		if [ -z $maskout_image ]; then echo "Error in MrCat:phoenix: maskout_image not specified for task maskout!"; exit 1; fi
+
+		fslmaths $maskout_image -bin -add 1 -uthr 1 -bin $WD/$space/dMRI/invmask.nii.gz
+
+		fs=`imglob $WD/$space/dMRI/*.nii.gz`
+		for ff in $fs; do
+			fslmaths $ff -mas $WD/$space/dMRI/invmask.nii.gz $ff
+		done
+
+		echo "   done"
+
+	fi # ---maskout
+
+	# -----------------------------------------
+	# removevols
+	# -----------------------------------------
+
+	# removevols
+	if [ $task = removevols ] ; then
+  		echo "Working on task: removing first couple of volumes from data, bvecs, and bvals"
+
+      # nrvols=`fslval $WD/$space/dMRI/data.nii.gz dim4`
+
+      fslroi $WD/$space/dMRI/data.nii.gz $WD/$space/dMRI/data.nii.gz 8 -1
+      cut -f 9- -d ' ' $WD/$space/dMRI/bvecs > $WD/$space/dMRI/bvecs
+      cut -f 9- -d ' ' $WD/$space/dMRI/bvals > $WD/$space/dMRI/bvals
+
+  		echo "  done"
+	fi # --removevols
+
+	# -----------------------------------------
+	# dtifit
+	# -----------------------------------------
+
+	# fit diffusion tensors to the data
+	if [ $task = dtifit ] ; then
+  		echo "Working on task: fit diffusion tensors to the data in current space"
+
+      if [ $templating = 1 ] ; then # for swapdim run with option save tensors so can use for template
+      # run dtifit
+        echo " run specific dtifit because templating"
+        dtifit --sse --save_tensor --data=$WD/$space/dMRI/data --out=$WD/$space/dMRI/dti --mask=$WD/$space/dMRI/nodif_brain_mask --bvecs=$WD/$space/dMRI/bvecs --bvals=$WD/$space/dMRI/bvals
+
+      else
+    		# run dtifit
+    		dtifit --sse --data=$WD/$space/dMRI/data --out=$WD/$space/dMRI/dti --mask=$WD/$space/dMRI/nodif_brain_mask --bvecs=$WD/$space/dMRI/bvecs --bvals=$WD/$space/dMRI/bvals
+
+  		fi
+      echo "  done"
+	fi # --dtifit
+
+	# -----------------------------------------
+	# fake_t1
+	# -----------------------------------------
+
+	if [ $task = fake_t1 ] ; then
+  		echo "Working on task: create fake T1 based on mean_f*samples"
+
+		# Create precon dir (if required)
+		mkdir -p $WD/$space/precon_all
+
+		# Determine method
+		if [ -z $fake_t1_method ] ; then
+      		fake_t1_method=Benn ;
+   		fi
+
+		# Do the work
+		fslmaths $WD/$space/dMRI.bedpostX/mean_f1samples -mul 0 \
+				$WD/$space/precon_all/fake_t1
+		if [ $fake_t1_method = Glasser ] ; then
+			fslmaths $WD/$space/precon_all/fake_t1 -add \
+				 $WD/$space/dMRI.bedpostX/mean_f1samples -add \
+				 $WD/$space/dMRI.bedpostX/mean_f2samples \
+				 -sqrt -sqrt $WD/$space/preconall/fake_t1
+		elif [ $fake_t1_method = Benn ] ; then
+			fslmaths $WD/$space/precon_all/fake_t1 -add \
+				 $WD/$space/dMRI.bedpostX/mean_f1samples -add \
+				 $WD/$space/dMRI.bedpostX/mean_f2samples \
+				 -sqrt -mul 2 $WD/$space/preconall/fake_t1
+		fi
+
+  		echo "  done"
+	fi # --fake_t1
+
+	# -----------------------------------------
+	# bedpostX
+	# -----------------------------------------
+
+	# run bedpostX model 2
+	if [ $task = bedpostX ] ; then
+  		echo "Working on task: run standard bedpostX on current space"
+
+  		# run bedpostx
+  		$FSLDIR/bin/bedpostx $WD/$space/dMRI -c
+
+  		echo "  bedpostx submitted"
+	fi # --bedpost
+
+	# -----------------------------------------
+	# swapdim
+	# -----------------------------------------
+
+	# swap the dimensions to approximate a standard orientation
+	if [ $task = swapdim ] ; then
+  		echo "Working on task: swap the dimensions of all data and bvecs"
+
+      	# Create the directory
+      	mkdir -p $WD/swapdim/dMRI
+
+  		# swap the diffusion dimensions
+  		for img in nodif nodif_restore nodif_brain_mask brainmask data T1w T1w_restore T2w T2w_restore; do
+        if [ -r $WD/orig/dMRI/$img.nii.gz ]; then
+            echo "  image $img.nii.gz"
+            echo "sh $MRCATDIR/core/swapdims.sh $WD/orig/dMRI/$img.nii.gz $dim_orig $WD/swapdim/dMRI/$img.nii.gz image"
+            sh $MRCATDIR/core/swapdims.sh $WD/orig/dMRI/$img.nii.gz $dim_orig $WD/swapdim/dMRI/$img.nii.gz image
+        fi
+  		done
+
+      	# swap the bvecs and copy bvals
+      	echo "  bvecs"
+      	echo "sh $MRCATDIR/core/swapdims.sh $WD/orig/dMRI/bvecs $dim_orig $WD/swapdim/dMRI/bvecs bvecs"
+      	sh $MRCATDIR/core/swapdims.sh $WD/orig/dMRI/bvecs $dim_orig $WD/swapdim/dMRI/bvecs bvecs
+      	echo "  bvals"
+      	cp $WD/orig/dMRI/bvals $WD/swapdim/dMRI/bvals
+
+  		# swap structural images
+  		for TX in T1 T2 ; do
+    			[[ -d $WD/orig/${TX}w/ ]] && mkdir -p $WD/swapdim/${TX}w/
+    			for img in T1w_restore T2w_restore ${TX}w ${TX}map ${TX}map_restore brainmask; do
+      				[[ -r $WD/orig/${TX}w/$img.nii.gz ]] && sh $MRCATIDR/core/swapdims.sh $WD/orig/dMRI/$img.nii.gz $dim_orig $WD/swapdim/dMRI/$img.nii.gz image
+    			done
+  		done
+
+  		# update the space from "orig" to "swapdim" if applicable
+  		[[ $space = "orig" ]] && space=swapdim
+		echo "Warming: now in swapdim space"
+
+  		echo "  done"
+	 fi  # --swapdim
+
+	# -----------------------------------------
+   	# flip_bvecs_x
+   	# -----------------------------------------
+
+   	# swap the dimensions to approximate a standard orientation
+   	if [ $task = flip_bvecs_x ] ; then
+    	echo "Working on task: flipping bvecs in $space space in x dimension"
+
+		cp -r $WD/${space}/dMRI $WD/${space}/dMRI_upflipped
+        sh $MRCATDIR/core/swapdims.sh $WD/${space}/dMRI/bvecs -x y z $WD/${space}/dMRI/bvecs bvecs
+
+       echo "  done"
+    fi  # --flip_bvecs_x
+
+    # -----------------------------------------
+    # flip_bvecs_y
+    # -----------------------------------------
+
+    # swap the dimensions to approximate a standard orientation
+    if [ $task = flip_bvecs_y ] ; then
+        echo "Working on task: flipping bvecs in $space space in y dimension"
+
+		cp -r $WD/${space}/dMRI $WD/${space}/dMRI_upflipped
+        sh $MRCATDIR/core/swapdims.sh $WD/${space}/dMRI/bvecs x -y z $WD/${space}/dMRI/bvecs bvecs
+
+        echo "  done"
+    fi  # --flip_bvecs_y
+
+    # -----------------------------------------
+    # flip_bvecs_z
+    # -----------------------------------------
+
+     # swap the dimensions to approximate a standard orientation
+    if [ $task = flip_bvecs_z ] ; then
+         echo "Working on task: flipping bvecs in $space space in z dimension"
+
+	 	cp -r $WD/${space}/dMRI $WD/${space}/dMRI_upflipped
+         sh $MRCATDIR/core/swapdims.sh $WD/${space}/dMRI/bvecs x y -z $WD/${space}/dMRI/bvecs bvecs
+
+         echo "  done"
+    fi  # --flip_bvecs_z
+
+	# -----------------------------------------
+	# extend_image_dim
+	# -----------------------------------------
+
+	if [ $task = extend_image_dim ] ; then
+  		echo "Working on task: exending image dimension"
+
+      if [ $templating = 1 ] ; then
+        echo " run specific extend dim because templating"
+        extendFile=$WD/$space/dMRI/extend.txt
+        if [ ! -f $extendFile ]; then echo "Error: extend text file not found"; exit 1; fi
+
+
+
+        # Do the work
+        for extend_src in nodif nodif_restore nodif_brain_mask brainmask data T1w T1w_restore T2w T2w_restore dti_FA; do
+
+          if [ -r $WD/$space/dMRI/$extend_src.nii.gz ]; then
+
+            echo "   Working on $WD/$space/dMRI/$extend_src ..."
+            imcp $WD/$space/dMRI/$extend_src $WD/$space/dMRI/${extend_src}_nonextend
+            while read -r extx exty extz ; do
+              echo "$extx $exty $extz"
+              fslroi $WD/$space/dMRI/$extend_src $WD/$space/dMRI/$extend_src 0 $extx 0 $exty 0 $extz 0 -1
+
+            done < $extendFile  # read instructions line by line
+
+          fi
+
+        done
+
+
+      else
+
+      	# Housekeeping
+      	# if [ -z $extend_src ]; then echo "Error in MrCat:preconall: required parameter extend_src is unset"; exit 1; fi
+      	if [ -z $extend_dim ]; then echo "Error in MrCat:preconall: required parameter extend_dim is unset"; exit 1; fi
+      	if [ -z $extend_num ]; then echo "Error in MrCat:preconall: required parameter extend_num is unset"; exit 1; fi
+
+      	# Do the work
+      	for extend_src in nodif nodif_restore nodif_brain_mask brainmask data T1w T1w_restore T2w T2w_restore dti_FA; do
+
+      		if [ -r $WD/$space/dMRI/$extend_src.nii.gz ]; then
+
+      			echo "   Working on $WD/$space/dMRI/$extend_src in dimension $extend_dim by $extend_num slices..."
+				imcp $WD/$space/dMRI/$extend_src $WD/$space/dMRI/${extend_src}_nonextend
+      			if [ $extend_dim = x ] ; then
+        			fslroi $WD/$space/dMRI/$extend_src $WD/$space/dMRI/tmp 0 $extend_num 0 -1 0 -1 0 -1
+        			fslmaths $WD/$space/dMRI/tmp -mul 0 $WD/$space/dMRI/tmp
+        			fslmerge -x $WD/$space/dMRI/${extend_src} $WD/$space/dMRI/$extend_src $WD/$space/dMRI/tmp
+      			elif [ $extend_dim = y ] ; then
+        			fslroi $WD/$space/dMRI/$extend_src $WD/$space/dMRI/tmp 0 -1 0 $extend_num 0 -1 0 -1
+        			fslmaths $WD/$space/dMRI/tmp -mul 0 $WD/$space/dMRI/tmp
+        			fslmerge -y $WD/$space/dMRI/${extend_src} $WD/$space/dMRI/$extend_src $WD/$space/dMRI/tmp
+      			elif [ $extend_dim = z ] ; then
+        			fslroi $WD/$space/dMRI/$extend_src $WD/$space/dMRI/tmp 0 -1 0 -1 0 $extend_num 0 -1
+        			fslmaths $WD/$space/dMRI/tmp -mul 0 $WD/$space/dMRI/tmp
+        			fslmerge -z $WD/$space/dMRI/${extend_src} $WD/$space/dMRI/$extend_src $WD/$space/dMRI/tmp
+      			fi
+          fi
+        done
+      fi
+
+      	echo "  done"
+  	fi # --extend_image_dim
+
+	# -----------------------------------------
+	# acpc
+	# -----------------------------------------
+
+	# swap the dimensions to approximate a standard orientation
+	if [ $task = acpc ] ; then
+    	echo "Working on task: acpc of all data and bvecs"
+
+    	# Check requirements
+    	if [ -z $acpcmat ]; then echo "Error in MrCat:preproc_ROB3: required parameter acpcmat is unset"; exit 1; fi
+    	if [ ! -f $WD/transform/${acpcmat}.mat ]; then echo "Error in MrCat:preproc_ROB3: file $WD/transform/${acpcmat}.mat not found"; exit 1; fi
+    	if [ -z $acpctarget ]; then acpctarget=$WD/$space/dMRI/dti_FA ;
+    	else acpctarget=$WD/$space/dMRI/$acpctarget ;
+    	fi
+
+    	echo "   apcmat is ${acpcmat}"
+    	echo "   acpctarget is ${acpctarget}"
+
+    	# Create the directory
+    	mkdir -p $WD/acpc/dMRI
+
+	  	echo "...using existing .mat ${acpcmat}"
+
+    	# Do the work (files)
+	  	for img in nodif nodif_restore nodif_brain_mask brainmask data T1w T1w_restore T2w T2w_restore; do
+      		if [ -r $WD/$space/dMRI/$img.nii.gz ]; then
+
+            if [ $templating = 1 ] ; then
+              echo "  image $img.nii.gz"
+              echo " run specific acpc because templating"
+              applywarp -i $WD/$space/dMRI/$img -o $WD/acpc/dMRI/$img -r $WD/$space/dMRI/nodif.nii.gz --premat=$WD/transform/${acpcmat}.mat --interp=spline
+
+
+            else
+          		echo "  image $img.nii.gz"
+          		flirt -in $WD/$space/dMRI/$img -ref $acpctarget -applyxfm -init $WD/transform/${acpcmat}.mat -out $WD/acpc/dMRI/$img
+            fi
+      		fi
+    	done
+
+      if [ $templating = 1 ] ; then
+        echo "redo nodif_brain_mask"
+        if [ -z $nodifbrain_threshold ]; then
+            fslmaths $WD/acpc/dMRI/nodif -thr 1000 -bin $WD/acpc/dMRI/nodif_brain_mask.nii.gz
+        elif [ ! -z $nodifbrain_threshold ]; then
+            fslmaths $WD/acpc/dMRI/nodif -thr $nodifbrain_threshold -bin $WD/acpc/dMRI/nodif_brain_mask.nii.gz
+        fi
+
+      else
+              # Binarize nodif_brain_mask, otherwise bedpostX crashes
+        fslmaths $WD/acpc/dMRI/nodif_brain_mask -bin $WD/acpc/dMRI/nodif_brain_mask
+      fi
+
+
+
+	  	# retrieve the xyz rows of the rotation matrix (ignoring the 4th column)
+  		a=$(awk 'FNR == 1 {$NF=""; print}' $WD/transform/${acpcmat}.mat)
+  		b=$(awk 'FNR == 2 {$NF=""; print}' $WD/transform/${acpcmat}.mat)
+  		c=$(awk 'FNR == 3 {$NF=""; print}' $WD/transform/${acpcmat}.mat)
+
+  		# read the bvecs file, for each dimension (3 x n)
+  		X=($(awk 'FNR == 1' $WD/$space/dMRI/bvecs))
+  		Y=($(awk 'FNR == 2' $WD/$space/dMRI/bvecs))
+  		Z=($(awk 'FNR == 3' $WD/$space/dMRI/bvecs))
+
+  		# multiply the bvecs by the rotation matrix, loop over images (columns in bvecs)
+  		str_Xrot=""
+  		str_Yrot=""
+  		str_Zrot=""
+  		for idx in ${!X[*]} ; do
+    		XYZ=$(echo ${X[$idx]} ${Y[$idx]} ${Z[$idx]})
+    		Xrot=$(echo $XYZ $a | awk '{print ($1*$4) + ($2*$5) + ($3*$6)}')
+    		Yrot=$(echo $XYZ $b | awk '{print ($1*$4) + ($2*$5) + ($3*$6)}')
+    		Zrot=$(echo $XYZ $c | awk '{print ($1*$4) + ($2*$5) + ($3*$6)}')
+    		str_Xrot=$(echo $str_Xrot $Xrot)
+    		str_Yrot=$(echo $str_Yrot $Yrot)
+    		str_Zrot=$(echo $str_Zrot $Zrot)
+  		done
+
+  		# and write out the rotated bvecs to a file
+  		echo $str_Xrot > $WD/acpc/dMRI/bvecs
+  		echo $str_Yrot >> $WD/acpc/dMRI/bvecs
+  		echo $str_Zrot >> $WD/acpc/dMRI/bvecs
+
+  		# and copy the bvals along
+  		cp $WD/$space/dMRI/bvals $WD/acpc/dMRI/bvals
+
+  		# update the space "acpc" if applicable
+ 	  	[[ $space = "orig" ]] && space=acpc
+    	[[ $space = "swapdim" ]] && space=acpc
+	  	echo "Warning: now in acpc space"
+
+  		echo "  done"
+	fi  # --acpc
+
+	# -----------------------------------------
+	# setorigin
+	# -----------------------------------------
+
+	# change sform to reflect origin
+	if [ $task = setorigin ] ; then
+    	echo "Working on task: setorigin"
+
+    	# Check requirements
+    	if [ -z $offsetx ]; then echo "Error in MrCat:phoenix: offsetx not specified for task setorigin"; exit 1; fi
+
+    	# Do the work (files)
+	  	for img in `imglob $WD/$space/dMRI/*.nii.gz`; do
+      		echo "Working on image $img"
+			fslorient -setsform -`fslval $img pixdim1` 0 0 $offsetx 0 `fslval $img pixdim2` 0 $offsety 0 0 `fslval $img pixdim3` $offsetz 0 0 0 `fslval $img dim4` $img
+			# fslorient -setsform -15 0 0 4 0 0 4 0 4 0 0 4 4 0 0 0 1 $img
+			fslorient -setsformcode 4 $img
+    	done
+
+  		echo "  done"
+	fi  # --setorigin
+
+  # -----------------------------------------
+  # inittemplate
+  # -----------------------------------------
+
+  # copy files in correct folder for template pipeline
+  if [ $task = inittemplate ] ; then
+      echo "Working on task: inittemplate"
+
+      # make folder
+      mkdir -p $root/templating/subs/$name
+
+      # copy files
+      cp $WD/$space/dMRI/nodif.nii.gz $root/templating/subs/$name/nodif.nii.gz
+      cp $WD/$space/dMRI/dti_tensor.nii.gz $root/templating/subs/$name/dti_tensor.nii.gz
+      cp $WD/$space/dMRI/dti_MD.nii.gz $root/templating/subs/$name/dti_MD.nii.gz
+
+
+      echo "  done"
+  fi  # --setorigin
+
+done

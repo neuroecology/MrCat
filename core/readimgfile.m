@@ -32,6 +32,11 @@ function [data, varargout] = readimgfile(filename,varargin)
 % separate docs. Compatible with MrCat versions
 %
 % version history
+% 2021-09-01    Rogier  Added .mat fdt_matrix check
+% 2020-07-08    Rogier  Added pscalar option
+% 2020-02-11    Rogier  Added search for load_nii if trying to load
+%                       NIFTI_GZ on PC
+% 2019-06-20    Rogier  Added pconn and ptseries capability
 % 2018-09-18    Suhas   Try ciftiopen when cifti_open fails to load dconn
 % 2018-08-29    Rogier  Improved error handling
 % 2018_06-12    Rogier  Changed to use new cifti_open.m for CIFTI files
@@ -100,6 +105,12 @@ if ~isempty(e)
             filetype = 'DSCALAR';
         elseif regexp(f,'dlabel') % dlabel.nii
             filetype = 'DLABEL';
+        elseif regexp(f,'pconn') % pconn.nii file
+            filetype = 'PCONN';
+        elseif regexp(f,'ptseries') % ptseries.nii
+            filetype = 'PTSERIES';
+        elseif regexp(f,'pscalar') % pscalar.nii
+            filetype = 'PSCALAR';
         else % assuming nifti
             filetype = 'NIFTI';
         end
@@ -127,16 +138,26 @@ elseif isempty(e)
     elseif exist([filename '.dtseries.nii'],'file')
         filetype = 'DTSERIES';
         filename = [filename '.dtseries.nii'];
-    elseif exist ([filename '.dscalar.nii'], 'file');
+    elseif exist ([filename '.dscalar.nii'], 'file')
         filetype = 'DSCALAR';
         filename = [filename '.dscalar.nii'];
-    elseif exist ([filename '.dlabel.nii'], 'file');
+    elseif exist ([filename '.dlabel.nii'], 'file')
         filetype = 'DLABEL';
         filename = [filename '.dlabel.nii'];
+    elseif exist([filename '.pconn.nii'],'file')
+        filetype = 'PCONN';
+        filename = [filename '.pconn.nii'];
+    elseif exist([filename '.ptseries.nii'],'file')
+        filetype = 'PTSERIES';
+        filename = [filename '.ptseries.nii'];
+    elseif exist([filename '.pscalar.nii'],'file')
+        filetype = 'PSCALAR';
+        filename = [filename '.ptseries.nii'];
+    elseif exist([filename '.nii'],'file')
     elseif exist([filename '.nii'],'file')
         filetype = 'NIFTI';
         filename = [filename '.nii'];
-    elseif exist([filename '.mat'],'file');
+    elseif exist([filename '.mat'],'file')
         filetype = 'MAT';
         filename = [filename '.mat'];
     else
@@ -163,8 +184,17 @@ switch filetype
         end                
     case 'NIFTI_GZ'
         % data = read_avw(filename);
-        hdr = load_nifti(filename);
-        data = hdr.vol;
+        if ispc
+            try
+                data = load_nii(filename);
+                data = data.img;
+            catch
+                error('Error in MrCat:readimgfile: Trying to use load_nii to read file, but cannot find it!');
+            end
+        else
+            hdr = load_nifti(filename);
+            data = hdr.vol;
+        end
     case 'DCONN'
         % Get wb_command
         wb_command = getenv('wb_command');
@@ -186,10 +216,23 @@ switch filetype
         wb_command = getenv('wb_command');
         data = ciftiopen(filename,wb_command);
         data = data.cdata;
+    case 'PCONN'
+        wb_command = getenv('wb_command');
+        data = ciftiopen(filename,wb_command);
+        data = data.cdata;
+    case 'PTSERIES'
+        wb_command = getenv('wb_command');
+        data = ciftiopen(filename,wb_command);
+        data = data.cdata;
+    case 'PSCALAR'
+        wb_command = getenv('wb_command');
+        data = ciftiopen(filename,wb_command);
+        data = data.cdata;
     case 'NIFTI'
         data = read_avw(filename);
     case 'MAT'
         data = load(filename);
+        if isfield(data,'fdt_matrix2'), data = data.fdt_matrix2; end
 end
 
 %==================================================
